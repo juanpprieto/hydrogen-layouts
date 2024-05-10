@@ -1,68 +1,32 @@
 import {Suspense} from 'react';
-import {defer, redirect, type LoaderFunctionArgs} from '@shopify/remix-oxygen';
+import {defer, type LoaderFunctionArgs} from '@shopify/remix-oxygen';
 import {
   Await,
   Link,
   useLoaderData,
-  type MetaFunction,
   type FetcherWithComponents,
 } from '@remix-run/react';
 import type {
   ProductFragment,
-  ProductVariantsQuery,
   ProductVariantFragment,
+  ProductVariantsQuery,
 } from 'storefrontapi.generated';
 import {
   Image,
   Money,
   VariantSelector,
   type VariantOption,
-  getSelectedProductOptions,
   CartForm,
 } from '@shopify/hydrogen';
-import type {
-  CartLineInput,
-  SelectedOption,
-} from '@shopify/hydrogen/storefront-api-types';
-import {getVariantUrl} from '~/lib/variants';
+import type {CartLineInput} from '@shopify/hydrogen/storefront-api-types';
+import {useProduct, PRODUCT_VARIANT_FRAGMENT} from '~/routes/products';
 
-export const meta: MetaFunction<typeof loader> = ({data}) => {
-  return [{title: `Hydrogen | ${data?.product.title ?? ''}`}];
-};
-
-export async function loader({params, request, context}: LoaderFunctionArgs) {
+export async function loader({params, context}: LoaderFunctionArgs) {
   const {handle} = params;
   const {storefront} = context;
 
   if (!handle) {
     throw new Error('Expected product handle to be defined');
-  }
-
-  // await the query for the critical product data
-  const {product} = await storefront.query(PRODUCT_QUERY, {
-    variables: {handle, selectedOptions: getSelectedProductOptions(request)},
-  });
-
-  if (!product?.id) {
-    throw new Response(null, {status: 404});
-  }
-
-  const firstVariant = product.variants.nodes[0];
-  const firstVariantIsDefault = Boolean(
-    firstVariant.selectedOptions.find(
-      (option: SelectedOption) =>
-        option.name === 'Title' && option.value === 'Default Title',
-    ),
-  );
-
-  if (firstVariantIsDefault) {
-    product.selectedVariant = firstVariant;
-  } else {
-    // if no selected variant was returned from the selected options,
-    // we redirect to the first variant's url with it's selected options applied
-    if (!product.selectedVariant) {
-      throw redirectToFirstVariant({product, request});
-    }
   }
 
   // In order to show which variants are available in the UI, we need to query
@@ -74,34 +38,12 @@ export async function loader({params, request, context}: LoaderFunctionArgs) {
     variables: {handle},
   });
 
-  return defer({product, variants});
-}
-
-function redirectToFirstVariant({
-  product,
-  request,
-}: {
-  product: ProductFragment;
-  request: Request;
-}) {
-  const url = new URL(request.url);
-  const firstVariant = product.variants.nodes[0];
-
-  return redirect(
-    getVariantUrl({
-      pathname: url.pathname,
-      handle: product.handle,
-      selectedOptions: firstVariant.selectedOptions,
-      searchParams: new URLSearchParams(url.search),
-    }),
-    {
-      status: 302,
-    },
-  );
+  return defer({variants});
 }
 
 export default function Product() {
-  const {product, variants} = useLoaderData<typeof loader>();
+  const {product} = useProduct();
+  const {variants} = useLoaderData<typeof loader>();
   const {selectedVariant} = product;
   return (
     <div className="product">
@@ -310,85 +252,6 @@ function AddToCartButton({
     </CartForm>
   );
 }
-
-const PRODUCT_VARIANT_FRAGMENT = `#graphql
-  fragment ProductVariant on ProductVariant {
-    availableForSale
-    compareAtPrice {
-      amount
-      currencyCode
-    }
-    id
-    image {
-      __typename
-      id
-      url
-      altText
-      width
-      height
-    }
-    price {
-      amount
-      currencyCode
-    }
-    product {
-      title
-      handle
-    }
-    selectedOptions {
-      name
-      value
-    }
-    sku
-    title
-    unitPrice {
-      amount
-      currencyCode
-    }
-  }
-` as const;
-
-const PRODUCT_FRAGMENT = `#graphql
-  fragment Product on Product {
-    id
-    title
-    vendor
-    handle
-    descriptionHtml
-    description
-    options {
-      name
-      values
-    }
-    selectedVariant: variantBySelectedOptions(selectedOptions: $selectedOptions, ignoreUnknownOptions: true, caseInsensitiveMatch: true) {
-      ...ProductVariant
-    }
-    variants(first: 1) {
-      nodes {
-        ...ProductVariant
-      }
-    }
-    seo {
-      description
-      title
-    }
-  }
-  ${PRODUCT_VARIANT_FRAGMENT}
-` as const;
-
-const PRODUCT_QUERY = `#graphql
-  query Product(
-    $country: CountryCode
-    $handle: String!
-    $language: LanguageCode
-    $selectedOptions: [SelectedOptionInput!]!
-  ) @inContext(country: $country, language: $language) {
-    product(handle: $handle) {
-      ...Product
-    }
-  }
-  ${PRODUCT_FRAGMENT}
-` as const;
 
 const PRODUCT_VARIANTS_FRAGMENT = `#graphql
   fragment ProductVariants on Product {
